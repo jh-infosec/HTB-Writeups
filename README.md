@@ -1,7 +1,7 @@
 # HTB Writeups & Security Notes
 
-Hi, I'm [Your Name] — currently working through Hack The Box (CJCA / CPTS paths) and starting an
-MSc in Cyber Security with AI in [month/year]. This repo is where I document machines I've solved,
+Hi, I'm JH! currently working through Hack The Box (CJCA / CPTS paths) and starting an
+MSc in Cyber Security with AI in September 2026. This repo is where I document machines I've solved,
 small tools I've built to solve problems I ran into along the way, and notes connecting offensive
 techniques to how a defender would actually detect them.
 
