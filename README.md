@@ -8,7 +8,7 @@ techniques to how a defender would actually detect them.
 ## What's here
 
 - **`machines/`** | Full writeups of HTB machines I've completed, including my actual debugging
-  process (not just the "clean" final solution) — I think showing how you actually troubleshoot a
+  process (not just the "clean" final solution). I think showing how you actually troubleshoot a
   failed exploit is more useful than pretending everything worked first try.
 - **`tools/`** | Small scripts I wrote to automate parts of an attack chain I kept getting wrong
   manually (e.g. JNDI listener setup, SMB mount helpers).
@@ -23,4 +23,4 @@ techniques to how a defender would actually detect them.
 
 ## Contact
 
-[LinkedIn] · [Email] · [HTB Profile]
+https://profile.hackthebox.com/profile/019f0e4e-4d2a-72e2-aff7-7fe2c9597626
