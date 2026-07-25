@@ -7,12 +7,12 @@ techniques to how a defender would actually detect them.
 
 ## What's here
 
-- **`machines/`** — Full writeups of HTB machines I've completed, including my actual debugging
+- **`machines/`** | Full writeups of HTB machines I've completed, including my actual debugging
   process (not just the "clean" final solution) — I think showing how you actually troubleshoot a
   failed exploit is more useful than pretending everything worked first try.
-- **`tools/`** — Small scripts I wrote to automate parts of an attack chain I kept getting wrong
+- **`tools/`** | Small scripts I wrote to automate parts of an attack chain I kept getting wrong
   manually (e.g. JNDI listener setup, SMB mount helpers).
-- **`bash-practice/`** — Solutions and debugging notes from HTB Academy bash scripting exercises.
+- **`bash-practice/`** | Solutions and debugging notes from HTB Academy bash scripting exercises.
 
 ## In progress
 
